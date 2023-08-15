@@ -19,6 +19,7 @@ package:
 functions:
   wsocket:
     timeout: 30
+    memorySize: 128
     role: !GetAtt DefaultRole.Arn
     handler: bin/wsocket
     events:
@@ -35,8 +36,9 @@ functions:
 constructs:
   wsocket_queue:
     type: queue
-    maxRetries: 2
+    maxRetries: 1
     worker: 
+      memorySize: 128
       handler: bin/messageHandler
       role: !GetAtt DefaultRole.Arn
       environment:
