@@ -40,8 +40,8 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				data, err := json.Marshal(event.Msg)
 
 				if err != nil {
-					log.Println(err.Error())
-					continue
+					log.Panicf("error while marshalling message: %s", err.Error())
+
 				}
 
 				dbclient := connection.NewDynamoClient()
@@ -49,8 +49,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				val, err := dynamodbattribute.Marshal(event.To)
 
 				if err != nil {
-					log.Println(err.Error())
-					continue
+					log.Panicf("error while marshalling event.To: %s", err.Error())
 				}
 				scanInput := &dynamodb.ScanInput{
 					TableName:        aws.String(os.Getenv("CONNECTION_TABLE")),
@@ -66,19 +65,23 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				output, err := dbclient.Scan(scanInput)
 
 				if err != nil {
-					log.Println("Scan Error", err.Error())
-					continue
+					log.Panicf("Scan Error %s", err.Error())
 				}
 
 				for _, item := range output.Items {
+
+					defer func() {
+						if recover() != nil {
+							log.Printf("recovered from: %v \n", item)
+						}
+					}()
 
 					var dynamoRecord messages.DynamoEvent
 
 					err = dynamodbattribute.UnmarshalMap(item, &dynamoRecord)
 
 					if err != nil {
-						log.Println(err.Error())
-						continue
+						log.Panicf("error while unmarshalling records: %s", err.Error())
 					}
 
 					_, err = apiGtw.PostToConnection(&apigatewaymanagementapi.PostToConnectionInput{
@@ -87,8 +90,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 					})
 
 					if err != nil {
-						log.Println("Error while posting", err.Error())
-						return err
+						log.Panicf("Error while posting, %s", err.Error())
 					}
 
 				}
@@ -105,8 +107,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				item, err := dynamodbattribute.MarshalMap(record)
 
 				if err != nil {
-					log.Println(err.Error())
-					continue
+					log.Panicf("error while entering chat, %s", err.Error())
 				}
 
 				input := &dynamodb.PutItemInput{
@@ -117,10 +118,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				_, err = dbclient.PutItem(input)
 
 				if err != nil {
-					log.Println(
-						err.Error(),
-					)
-					continue
+					log.Panicf("error while entering chat, %s", err.Error())
 				}
 			}
 		case event.Type == messages.BROADCAST:
@@ -132,8 +130,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				data, err := json.Marshal(event.Msg)
 
 				if err != nil {
-					log.Println(err.Error())
-					continue
+					log.Panicf("error while broadcasting chat, %s", err.Error())
 				}
 
 				dbclient := connection.NewDynamoClient()
@@ -146,6 +143,11 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 				for _, item := range output.Items {
 
+					go func() {
+						if recover() != nil {
+							log.Printf("recovered from item error, item: %v", item)
+						}
+					}()
 					var dynamoRecord messages.DynamoEvent
 
 					err = dynamodbattribute.UnmarshalMap(item, &dynamoRecord)
@@ -160,8 +162,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 					})
 
 					if err != nil {
-						log.Println("Error while posting", err.Error())
-						return err
+						log.Panicf("error while posting message, %s", err.Error())
 					}
 
 				}
@@ -190,20 +191,17 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 					output, err := dynamoConn.Query(input)
 
 					if err != nil {
-						log.Printf("error fetching %s", err.Error())
-						continue
+						log.Panicf("error fetching %s", err.Error())
 					}
 
 					if len(output.Items) == 0 {
-						log.Printf("no connection found by the id: %s", event.From)
-						continue
+						log.Panicf("no connection found by the id: %s", event.From)
 					}
 
 					err = dynamodbattribute.UnmarshalMap(output.Items[0], &itemToDelete)
 
 					if err != nil {
-						log.Printf("error while disconnecting %s \n", err.Error())
-						continue
+						log.Panicf("error while disconnecting %s \n", err.Error())
 					}
 					log.Println(itemToDelete)
 				}
@@ -215,7 +213,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 					})
 
 					if err != nil {
-						log.Printf("error while disconnecting %s \n", err.Error())
+						log.Panicf("error while disconnecting %s \n", err.Error())
 					}
 
 					log.Println(dynamoKey)
@@ -228,7 +226,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 					_, err = dynamoConn.DeleteItem(input)
 
 					if err != nil {
-						log.Printf("error while deleting item on disconnect %s \n", err.Error())
+						log.Panicf("error while deleting item on disconnect %s \n", err.Error())
 					}
 				}
 
