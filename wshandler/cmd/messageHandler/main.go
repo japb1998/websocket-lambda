@@ -46,15 +46,28 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 				dbclient := connection.NewDynamoClient()
 
+				val, err := dynamodbattribute.Marshal(event.To)
+
+				if err != nil {
+					log.Println(err.Error())
+					continue
+				}
 				scanInput := &dynamodb.ScanInput{
 					TableName:        aws.String(os.Getenv("CONNECTION_TABLE")),
 					FilterExpression: aws.String("#sortKey = :sortKey"),
+					ExpressionAttributeNames: map[string]*string{
+						"#sortKey": aws.String("sortKey"),
+					},
+					ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+						":sortKey": val,
+					},
 				}
 
 				output, err := dbclient.Scan(scanInput)
 
 				if err != nil {
 					log.Println("Scan Error", err.Error())
+					continue
 				}
 
 				for _, item := range output.Items {
@@ -65,6 +78,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 					if err != nil {
 						log.Println(err.Error())
+						continue
 					}
 
 					_, err = apiGtw.PostToConnection(&apigatewaymanagementapi.PostToConnectionInput{
@@ -106,6 +120,7 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 					log.Println(
 						err.Error(),
 					)
+					continue
 				}
 			}
 		case event.Type == messages.BROADCAST:
@@ -176,16 +191,19 @@ func handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 					if err != nil {
 						log.Printf("error fetching %s", err.Error())
+						continue
 					}
 
 					if len(output.Items) == 0 {
 						log.Printf("no connection found by the id: %s", event.From)
+						continue
 					}
 
 					err = dynamodbattribute.UnmarshalMap(output.Items[0], &itemToDelete)
 
 					if err != nil {
 						log.Printf("error while disconnecting %s \n", err.Error())
+						continue
 					}
 					log.Println(itemToDelete)
 				}
