@@ -1,0 +1,115 @@
+
+service: websocket
+
+useDotenv: true
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: go1.x
+
+plugins:
+  - serverless-lift
+package:
+  patterns:
+    - '!./**'
+    - ./bin/**
+
+functions:
+  wsocket:
+    timeout: 30
+    role: !GetAtt DefaultRole.Arn
+    handler: bin/wsocket
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+      - websocket:
+          route: $default
+    environment:
+      CONNECTION_TABLE: !Ref ConnectionsDataTable
+      QUEUE_URL: ${construct:wsocket_queue.queueUrl}
+
+constructs:
+  wsocket_queue:
+    type: queue
+    maxRetries: 2
+    worker: 
+      handler: bin/messageHandler
+      role: !GetAtt DefaultRole.Arn
+      environment:
+        CONNECTION_TABLE: !Ref ConnectionsDataTable
+        QUEUE_URL: ${construct:wsocket_queue.queueUrl}
+# you can add CloudFormation resource templates here
+resources:
+  Resources:
+    ConnectionsDataTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-connections-database
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: partitionKey
+            AttributeType: 'S'
+          - AttributeName: sortKey
+            AttributeType: 'S'
+        KeySchema:
+          - AttributeName: partitionKey
+            KeyType: HASH
+          - AttributeName: sortKey
+            KeyType: RANGE
+    DefaultRole:
+        Type: AWS::IAM::Role
+        Properties:
+          RoleName: ${env:APP_ID}-dynamo-access-${opt:stage, 'dev'}
+          AssumeRolePolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service:
+                    - lambda.amazonaws.com
+                Action: sts:AssumeRole
+          Policies:
+            - PolicyName: ${env:APP_ID}-dynamo-access-${opt:stage, 'dev'}
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - dynamodb:*
+                    Resource:
+                      - !GetAtt ConnectionsDataTable.Arn 
+                      - !Join ["",[!GetAtt ConnectionsDataTable.Arn, "/index/*"]]
+            - PolicyName: ${env:APP_ID}-cloudwatch-default-${opt:stage, 'dev'}
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - logs:CreateLogStream
+                      - logs:CreateLogGroup
+                      - logs:TagResource
+                      - logs:PutLogEvents
+                    Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+            - PolicyName: ${env:APP_ID}-sqs-access-${opt:stage, 'dev'}
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - sqs:*
+                    Resource:
+                      - ${construct:wsocket_queue.queueArn}
+            - PolicyName: ${env:APP_ID}-ws-access-${opt:stage, 'dev'}
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - execute-api:Invoke
+                      - execute-api:ManageConnections
+                    Resource:
+                      - 'arn:aws:execute-api:*:*'
