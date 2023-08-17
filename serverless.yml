@@ -8,6 +8,7 @@ frameworkVersion: '3'
 provider:
   name: aws
   runtime: go1.x
+  
 
 plugins:
   - serverless-lift
@@ -25,6 +26,10 @@ functions:
     events:
       - websocket:
           route: $connect
+          authorizer:
+            name: authorizerFunc
+            identitySource:
+              - route.request.header.Authorization
       - websocket:
           route: $disconnect
       - websocket:
@@ -32,6 +37,11 @@ functions:
     environment:
       CONNECTION_TABLE: !Ref ConnectionsDataTable
       QUEUE_URL: ${construct:wsocket_queue.queueUrl}
+  authorizerFunc:
+    timeout: 10
+    memorySize: 128
+    role: !GetAtt DefaultRole.Arn
+    handler: bin/authorizer
 
 constructs:
   wsocket_queue:
