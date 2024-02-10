@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "serverless-lift": "^1.27.0"
+  },
+  "dependencies": {
+    "serverless-deployment-bucket": "^1.6.0"
   }
 }

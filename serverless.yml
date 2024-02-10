@@ -5,55 +5,69 @@ useDotenv: true
 
 frameworkVersion: '3'
 
+plugins:
+  - serverless-deployment-bucket
+
 provider:
   name: aws
-  runtime: go1.x
-  
+  runtime: provided.al2
+  architecture: arm64
+  versionFunctions: false
 
-plugins:
-  - serverless-lift
+custom:
+  deploymentBucket:
+    name: ${env:APP_ID}
+    serverSideEncryption: AES256
+  websocketUrl : !Join ['', ['https://', !Ref WebsocketsApi, '.execute-api.', !Sub '${AWS::Region}', '.amazonaws.com/', "${opt:stage, 'dev'}"]]
+
 package:
-  patterns:
-    - '!./**'
-    - ./bin/**
+  individually: true
 
 functions:
   wsocket:
-    timeout: 30
+    timeout: 29
     memorySize: 128
     role: !GetAtt DefaultRole.Arn
-    handler: bin/wsocket
+    handler: bootstrap
+    package:
+      artifact: ./bin/connection/connection.zip
     events:
       - websocket:
           route: $connect
           authorizer:
             name: authorizerFunc
             identitySource:
-              - route.request.header.Authorization
+              - route.request.querystring.Auth
       - websocket:
           route: $disconnect
       - websocket:
           route: $default
     environment:
       CONNECTION_TABLE: !Ref ConnectionsDataTable
-      QUEUE_URL: ${construct:wsocket_queue.queueUrl}
   authorizerFunc:
     timeout: 10
     memorySize: 128
     role: !GetAtt DefaultRole.Arn
-    handler: bin/authorizer
-
-constructs:
-  wsocket_queue:
-    type: queue
-    maxRetries: 1
-    worker: 
-      memorySize: 128
-      handler: bin/messageHandler
-      role: !GetAtt DefaultRole.Arn
-      environment:
-        CONNECTION_TABLE: !Ref ConnectionsDataTable
-        QUEUE_URL: ${construct:wsocket_queue.queueUrl}
+    handler: bootstrap
+    package:
+      artifact: ./bin/authorizer/authorizer.zip
+    environment:
+      REGION: !Sub ${AWS::Region}
+      ACCOUNT_ID: !Sub ${AWS::AccountId}
+      API_ID: !Ref WebsocketsApi
+      STAGE: ${opt:stage, 'dev'}
+  schedule-event:
+    timeout: 10
+    memorySize: 128
+    role: !GetAtt DefaultRole.Arn
+    handler: bootstrap
+    package:
+      artifact: ./bin/schedule/schedule.zip
+    environment:
+      CONNECTION_TABLE: !Ref ConnectionsDataTable
+      WS_URL: ${self:custom.websocketUrl}
+    events:
+      - schedule: rate(1 minute)
 # you can add CloudFormation resource templates here
 resources:
   Resources:
@@ -106,15 +120,6 @@ resources:
                       - logs:TagResource
                       - logs:PutLogEvents
                     Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
-            - PolicyName: ${env:APP_ID}-sqs-access-${opt:stage, 'dev'}
-              PolicyDocument:
-                Version: '2012-10-17'
-                Statement:
-                  - Effect: Allow
-                    Action:
-                      - sqs:*
-                    Resource:
-                      - ${construct:wsocket_queue.queueArn}
             - PolicyName: ${env:APP_ID}-ws-access-${opt:stage, 'dev'}
               PolicyDocument:
                 Version: '2012-10-17'

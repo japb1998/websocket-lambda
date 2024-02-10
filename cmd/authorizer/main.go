@@ -3,25 +3,36 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
+var h = slog.NewTextHandler(os.Stdout, nil).WithAttrs([]slog.Attr{slog.String("pkg", "authorizer")})
+var logger = slog.New(h)
+
 func handler(ctx context.Context, event events.APIGatewayWebsocketProxyRequest) (events.APIGatewayCustomAuthorizerResponse, error) {
-	token, ok := event.Headers["Authorization"]
+	logger.Info("Authorizer event", slog.String("event", fmt.Sprintf("%+v", event)))
+	token, ok := event.QueryStringParameters["Auth"]
 
 	if !ok || token == "" {
 		return events.APIGatewayCustomAuthorizerResponse{}, errors.New("Unauthorized")
 	} else {
+		resource := fmt.Sprintf("arn:aws:execute-api:%s:%s:%s/%s/$connect", os.Getenv("REGION"), os.Getenv("ACCOUNT_ID"), os.Getenv("API_ID"), os.Getenv("STAGE"))
+		logger.Info("resource", slog.String("event", event.Resource), slog.String("resource", resource))
+
 		// METHOD arn should be arn:aws:execute-api:region:account-id:api-id/stage-name/$connect
-		return generatePolicy("user", "Allow", "*", token), nil
+		return generatePolicy("user", "Allow", fmt.Sprintf("arn:aws:execute-api:%s:%s:%s/%s/$connect", os.Getenv("REGION"), os.Getenv("ACCOUNT_ID"), os.Getenv("API_ID"), os.Getenv("STAGE")), token), nil
 	}
 }
 func main() {
 	lambda.Start(handler)
 }
 
+// generatePolicy creates a policy for the given principalId, effect and resource
 func generatePolicy(principalId, effect, resource, token string) events.APIGatewayCustomAuthorizerResponse {
 	authResponse := events.APIGatewayCustomAuthorizerResponse{PrincipalID: principalId}
 	if effect != "" && resource != "" {
@@ -36,6 +47,7 @@ func generatePolicy(principalId, effect, resource, token string) events.APIGatew
 			},
 		}
 	}
+	// any property you want to pass to the next handler
 	authResponse.Context = map[string]interface{}{
 		"email": token,
 	}
